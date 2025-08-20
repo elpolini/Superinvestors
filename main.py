@@ -210,11 +210,11 @@ def load_data():
     
     # Extract activity type and percentage
     df['Activity_Type'] = df['RecentActivity'].apply(lambda x: 
-        'Compra' if pd.isna(x) else 
+        'Mantener' if pd.isna(x) else  # NaN means Hold position
         'Compra' if x == 'Buy' else
         'Añadir' if 'Add' in str(x) else 
         'Reducir' if 'Reduce' in str(x) else 
-        'Mantener'
+        'Mantener'  # Default to Hold for any other case
     )
     
     df['Activity_Percentage'] = df['RecentActivity'].apply(lambda x: 
