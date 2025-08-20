@@ -327,6 +327,46 @@ if view_mode == "🌟 Universo de Carteras":
     with col_main:
         st.markdown("### 🎨 Universo Interactivo de Carteras - Haz Clic para Explorar")
         
+        # Add investor selection controls
+        col_select1, col_select2 = st.columns([3, 1])
+        with col_select1:
+            all_investors_sunburst = sorted(filtered_df['Investor'].unique())
+            default_selection = filtered_df.groupby('Investor')['Value_Clean'].sum().nlargest(10).index.tolist()
+            
+            # Add quick selection buttons
+            quick_select = st.radio(
+                "Selección rápida:",
+                ["Top 10 por valor", "Top 5 por valor", "Personalizado"],
+                horizontal=True,
+                index=0
+            )
+            
+            if quick_select == "Top 10 por valor":
+                default_selection = filtered_df.groupby('Investor')['Value_Clean'].sum().nlargest(10).index.tolist()
+            elif quick_select == "Top 5 por valor":
+                default_selection = filtered_df.groupby('Investor')['Value_Clean'].sum().nlargest(5).index.tolist()
+            else:
+                default_selection = []  # Let user select manually
+            
+            selected_investors_sunburst = st.multiselect(
+                "🎯 Seleccionar inversores para visualizar (máx. 20):",
+                all_investors_sunburst,
+                default=default_selection if len(all_investors_sunburst) >= len(default_selection) else all_investors_sunburst[:min(10, len(all_investors_sunburst))],
+                max_selections=20,
+                key="sunburst_investors",
+                help="Selecciona específicamente qué inversores quieres ver en el gráfico. Puedes hacer clic en cualquier segmento del gráfico para hacer zoom."
+            )
+        
+        with col_select2:
+            max_stocks_per_investor = st.slider(
+                "📊 Máx. acciones por inversor",
+                min_value=5,
+                max_value=30,
+                value=15,
+                step=5,
+                help="Limita el número de acciones mostradas por cada inversor"
+            )
+        
         # Check if we have data after filtering
         if filtered_df.empty:
             st.warning("⚠️ No hay datos disponibles con los filtros actuales. Por favor ajusta los filtros en la barra lateral.")
@@ -336,25 +376,25 @@ if view_mode == "🌟 Universo de Carteras":
                 - Ajusta el porcentaje mínimo de portfolio
                 - Asegúrate de tener al menos un tipo de actividad seleccionado
             """)
+        elif not selected_investors_sunburst:
+            st.warning("⚠️ Por favor selecciona al menos un inversor para visualizar.")
+            st.info("💡 Usa el selector arriba para elegir qué inversores quieres analizar en detalle.")
         else:
-            # Prepare enhanced sunburst data
-            # Get top investors by value for better visualization
-            top_investors = filtered_df.groupby('Investor')['Value_Clean'].sum().nlargest(20).index
+            # Prepare enhanced sunburst data using selected investors
+            sunburst_data = filtered_df[filtered_df['Investor'].isin(selected_investors_sunburst)].copy()
             
-            if len(top_investors) == 0:
-                st.warning("No se encontraron inversores con los filtros actuales.")
+            if sunburst_data.empty:
+                st.warning("No se encontraron datos para los inversores seleccionados.")
             else:
-                sunburst_data = filtered_df[filtered_df['Investor'].isin(top_investors)].copy()
-                
                 # Add activity layer
                 sunburst_data['Activity_Group'] = sunburst_data['Activity_Type'].apply(
                     lambda x: '🟢 Comprando' if x in ['Compra', 'Añadir'] else '🔴 Vendiendo' if x == 'Reducir' else '⚪ Manteniendo'
                 )
                 
-                # Get top holdings per investor for clarity
+                # Get top holdings per investor for clarity using the slider value
                 sunburst_filtered = []
-                for investor in top_investors:
-                    investor_data = sunburst_data[sunburst_data['Investor'] == investor].nlargest(15, '% of Portfolio')
+                for investor in selected_investors_sunburst:
+                    investor_data = sunburst_data[sunburst_data['Investor'] == investor].nlargest(max_stocks_per_investor, '% of Portfolio')
                     if not investor_data.empty:
                         sunburst_filtered.append(investor_data)
                 
@@ -398,9 +438,9 @@ if view_mode == "🌟 Universo de Carteras":
                     )
                     
                     fig_sunburst.update_layout(
-                        height=750,
+                        height=850,
                         paper_bgcolor='rgba(0,0,0,0)',
-                        font=dict(color='white', size=12),
+                        font=dict(color='white', size=14),
                         margin=dict(t=30, l=0, r=0, b=0),
                         coloraxis_colorbar=dict(
                             title="% Cartera",
@@ -418,6 +458,11 @@ if view_mode == "🌟 Universo de Carteras":
                     
                     st.plotly_chart(fig_sunburst, use_container_width=True)
                     
+                    # Show current visualization stats
+                    num_investors_shown = sunburst_final['Investor'].nunique()
+                    num_stocks_shown = sunburst_final['Stock'].nunique()
+                    st.caption(f"📊 Mostrando {num_investors_shown} inversores con {num_stocks_shown} acciones únicas • 🔍 Haz clic en cualquier segmento para hacer zoom")
+                    
                     # Instructions
                     st.info("💡 **Características Interactivas:** Haz clic en cualquier segmento para acercar • Clic en el centro para alejar • Pasa el mouse para información detallada • Los colores representan concentración de cartera")
                     
@@ -431,7 +476,7 @@ if view_mode == "🌟 Universo de Carteras":
                         Es una visualización jerárquica circular que muestra las carteras de inversión de los superinversores en múltiples niveles:
                         
                         **Estructura de los Anillos:**
-                        1. **Centro (Primer Anillo):** Los 20 principales inversores por valor de cartera
+                        1. **Centro (Primer Anillo):** Los inversores seleccionados
                         2. **Segundo Anillo:** Tipo de actividad reciente:
                            - 🟢 **Comprando** = Nuevas posiciones o aumentando
                            - 🔴 **Vendiendo** = Reduciendo posiciones
