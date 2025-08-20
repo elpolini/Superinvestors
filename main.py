@@ -263,10 +263,13 @@ with st.sidebar:
         )
     
     if view_mode == "🎭 Análisis Comparativo":
+        all_investors_comp = sorted(df['Investor'].unique())
+        default_comp = all_investors_comp[:3] if len(all_investors_comp) >= 3 else all_investors_comp
+        
         selected_investors = st.multiselect(
             "📊 Seleccionar Inversores para Comparar",
-            sorted(df['Investor'].unique()),
-            default=sorted(df['Investor'].unique())[:3]
+            all_investors_comp,
+            default=default_comp
         )
     
     # Activity filter
@@ -307,16 +310,34 @@ if view_mode == "🌟 Universo de Carteras":
         total_value = filtered_df['Value_Clean'].sum() / 1e9
         st.metric("AUM Total", f"${total_value:.1f}B", delta="💰")
     with col4:
-        avg_holdings = len(filtered_df) / max(filtered_df['Investor'].nunique(), 1)
+        num_investors = filtered_df['Investor'].nunique()
+        if num_investors > 0:
+            avg_holdings = len(filtered_df) / num_investors
+        else:
+            avg_holdings = 0
         st.metric("Promedio Pos.", f"{avg_holdings:.0f}", delta="📊")
     with col5:
         if not filtered_df.empty:
-            concentration = filtered_df.groupby('Investor')['% of Portfolio'].apply(lambda x: x.nlargest(5).sum()).mean()
+            # Calculate average Top 5 concentration more safely
+            investors_conc = []
+            for inv in filtered_df['Investor'].unique():
+                inv_df = filtered_df[filtered_df['Investor'] == inv]
+                if not inv_df.empty:
+                    top5_sum = inv_df.nlargest(5, '% of Portfolio')['% of Portfolio'].sum()
+                    investors_conc.append(top5_sum)
+            
+            if investors_conc:
+                concentration = sum(investors_conc) / len(investors_conc)
+            else:
+                concentration = 0
         else:
             concentration = 0
         st.metric("Top5 Prom.", f"{concentration:.1f}%", delta="🔥")
     with col6:
-        buy_activity = (filtered_df['Activity_Type'].isin(['Compra', 'Añadir'])).sum() / max(len(filtered_df), 1) * 100
+        if not filtered_df.empty and len(filtered_df) > 0:
+            buy_activity = (filtered_df['Activity_Type'].isin(['Compra', 'Añadir'])).sum() / len(filtered_df) * 100
+        else:
+            buy_activity = 0
         st.metric("Actividad Compra", f"{buy_activity:.1f}%", delta="📈")
     
     st.markdown("---")
@@ -633,21 +654,78 @@ if view_mode == "🌟 Universo de Carteras":
 elif view_mode == "🎯 Inteligencia de Portafolio":
     st.markdown("## 🎯 Inteligencia Avanzada de Portafolio", unsafe_allow_html=True)
     
+    # Add global investor selection for Portfolio Intelligence
+    st.markdown("### 🎯 Selección de Inversores para Análisis de Inteligencia")
+    col_intel1, col_intel2 = st.columns([3, 1])
+    
+    with col_intel1:
+        all_investors_intel = sorted(filtered_df['Investor'].unique())
+        
+        # Quick selection options
+        quick_select_intel = st.radio(
+            "Selección rápida:",
+            ["Top 20 por valor", "Top 10 por valor", "Top 5 por valor", "Personalizado"],
+            horizontal=True,
+            index=1,  # Default to Top 10
+            key="quick_select_intel"
+        )
+        
+        if quick_select_intel == "Top 20 por valor":
+            default_intel = filtered_df.groupby('Investor')['Value_Clean'].sum().nlargest(20).index.tolist()
+        elif quick_select_intel == "Top 10 por valor":
+            default_intel = filtered_df.groupby('Investor')['Value_Clean'].sum().nlargest(10).index.tolist()
+        elif quick_select_intel == "Top 5 por valor":
+            default_intel = filtered_df.groupby('Investor')['Value_Clean'].sum().nlargest(5).index.tolist()
+        else:
+            default_intel = []
+        
+        selected_investors_intel = st.multiselect(
+            "🎯 Seleccionar inversores para análisis de inteligencia (máx. 30):",
+            all_investors_intel,
+            default=default_intel if len(all_investors_intel) >= len(default_intel) else all_investors_intel[:min(10, len(all_investors_intel))],
+            max_selections=30,
+            key="intel_investors",
+            help="Estos inversores se usarán en todos los análisis de inteligencia de portafolio"
+        )
+    
+    with col_intel2:
+        st.metric("Inversores seleccionados", len(selected_investors_intel))
+        if selected_investors_intel:
+            total_positions = filtered_df[filtered_df['Investor'].isin(selected_investors_intel)]['Stock'].nunique()
+            st.metric("Acciones únicas", total_positions)
+    
+    if not selected_investors_intel:
+        st.warning("⚠️ Por favor selecciona al menos un inversor para el análisis de inteligencia.")
+        st.stop()
+    
+    # Filter data for selected investors
+    intel_df = filtered_df[filtered_df['Investor'].isin(selected_investors_intel)]
+    
+    st.markdown("---")
+    
     # Create sub-tabs for different analyses
     tab1, tab2, tab3 = st.tabs(["📊 Análisis de Concentración", "🎯 Puntuación de Diversidad", "🔮 Reconocimiento de Patrones"])
     
     with tab1:
         st.markdown("### 📊 Análisis Multidimensional de Inversores")
         
-        # Add investor selection for radar chart
-        all_investors_radar = sorted(filtered_df['Investor'].unique())
-        selected_radar = st.multiselect(
-            "Seleccionar inversores para comparar (máx. 8):",
-            all_investors_radar,
-            default=filtered_df.groupby('Investor')['Value_Clean'].sum().nlargest(6).index.tolist() if len(all_investors_radar) >= 6 else all_investors_radar[:min(6, len(all_investors_radar))],
-            max_selections=8,
-            key="radar_investors"
-        )
+        # Refine selection for radar chart from pre-selected investors
+        col_radar1, col_radar2 = st.columns([3, 1])
+        
+        with col_radar1:
+            selected_radar = st.multiselect(
+                "🎯 Refinar selección para gráfico radar (máx. 8):",
+                selected_investors_intel,
+                default=selected_investors_intel[:min(6, len(selected_investors_intel))],
+                max_selections=8,
+                key="radar_investors",
+                help="Selecciona hasta 8 inversores del grupo principal para comparación multidimensional"
+            )
+        
+        with col_radar2:
+            st.metric("Inversores en radar", len(selected_radar))
+            if selected_radar:
+                st.caption("✨ Comparación visual de perfiles de inversión")
         
         with st.expander("ℹ️ Cómo leer este gráfico radar"):
             st.markdown("""
@@ -666,18 +744,25 @@ elif view_mode == "🎯 Inteligencia de Portafolio":
             """)
         
         if selected_radar:
-            # Create radar chart for selected investors
+            # Create radar chart for selected investors using intel_df
             radar_data = []
             for investor in selected_radar:
-                investor_df = filtered_df[filtered_df['Investor'] == investor]
+                investor_df = intel_df[intel_df['Investor'] == investor]
                 if not investor_df.empty:
+                    max_stocks = investor_df['Stock'].nunique()
+                    max_portfolio = investor_df['% of Portfolio'].max()
+                    mean_portfolio = investor_df['% of Portfolio'].mean()
+                    buy_add_count = (investor_df['Activity_Type'].isin(['Compra', 'Añadir'])).sum()
+                    total_count = len(investor_df)
+                    total_value = investor_df['Value_Clean'].sum()
+                    
                     radar_data.append({
                         'Investor': investor,
-                        'Posiciones': min(investor_df['Stock'].nunique() / 50 * 100, 100),
-                        'Top1': investor_df['% of Portfolio'].max(),
-                        'Pos_Promedio': investor_df['% of Portfolio'].mean() * 10,
-                        'Actividad_Compra': (investor_df['Activity_Type'].isin(['Compra', 'Añadir'])).sum() / len(investor_df) * 100,
-                        'Valor': min(investor_df['Value_Clean'].sum() / 1e8, 100)  # Scale to 100
+                        'Posiciones': min((max_stocks / 50) * 100, 100) if max_stocks > 0 else 0,
+                        'Top1': max_portfolio if max_portfolio > 0 else 0,
+                        'Pos_Promedio': (mean_portfolio * 10) if mean_portfolio > 0 else 0,
+                        'Actividad_Compra': (buy_add_count / total_count * 100) if total_count > 0 else 0,
+                        'Valor': min(total_value / 1e8, 100) if total_value > 0 else 0
                     })
             
             if radar_data:
@@ -687,7 +772,7 @@ elif view_mode == "🎯 Inteligencia de Portafolio":
                 
                 for item in radar_data:
                     fig_radar.add_trace(go.Scatterpolar(
-                        r=[item[cat] for cat in categories],
+                        r=[item.get(cat, 0) for cat in categories],
                         theta=categories,
                         fill='toself',
                         name=item['Investor'][:25]
@@ -715,6 +800,15 @@ elif view_mode == "🎯 Inteligencia de Portafolio":
     with tab2:
         st.markdown("### 🎯 Análisis de Diversidad de Cartera")
         
+        # Optionally refine selection for diversity analysis
+        selected_investors_div = st.multiselect(
+            "Refinar selección para análisis de diversidad (opcional):",
+            selected_investors_intel,
+            default=selected_investors_intel,
+            key="diversity_investors",
+            help="Puedes refinar la selección del grupo principal si lo deseas"
+        )
+        
         col1, col2 = st.columns(2)
         
         with col1:
@@ -735,44 +829,68 @@ elif view_mode == "🎯 Inteligencia de Portafolio":
                 - <40: Altamente concentrado
                 """)
             
-            # Calculate diversity score
-            diversity_scores = filtered_df.groupby('Investor').apply(
-                lambda x: pd.Series({
-                    'Num_Acciones': x['Stock'].nunique(),
-                    'HHI': (x['% of Portfolio'] ** 2).sum(),  # Herfindahl index
-                    'Concentracion_Top5': x.nlargest(5, '% of Portfolio')['% of Portfolio'].sum()
-                })
-            ).reset_index()
-            
-            diversity_scores['Puntuacion_Diversidad'] = (
-                (diversity_scores['Num_Acciones'] / diversity_scores['Num_Acciones'].max()) * 40 +
-                ((1 - diversity_scores['HHI'] / 10000) * 100) * 30 +
-                ((100 - diversity_scores['Concentracion_Top5']) / 100 * 100) * 30
-            )
-            
-            fig_diversity = px.scatter(
-                diversity_scores.nlargest(20, 'Puntuacion_Diversidad'),
-                x='Num_Acciones',
-                y='Puntuacion_Diversidad',
-                size='Concentracion_Top5',
-                color='Puntuacion_Diversidad',
-                hover_data=['Investor'],
-                color_continuous_scale='Turbo',
-                title='Panorama de Diversidad de Cartera',
-                labels={'Num_Acciones': 'Número de Posiciones', 'Puntuacion_Diversidad': 'Puntuación de Diversidad (0-100)'}
-            )
-            
-            fig_diversity.update_layout(
-                height=500,
-                paper_bgcolor='rgba(0,0,0,0)',
-                plot_bgcolor='rgba(0,0,0,0)',
-                font=dict(color='white')
-            )
-            
-            st.plotly_chart(fig_diversity, use_container_width=True)
+            # Calculate diversity score for selected investors
+            if selected_investors_div:
+                div_df = intel_df[intel_df['Investor'].isin(selected_investors_div)]
+                diversity_scores = div_df.groupby('Investor').apply(
+                    lambda x: pd.Series({
+                        'Num_Acciones': x['Stock'].nunique(),
+                        'HHI': (x['% of Portfolio'] ** 2).sum(),  # Herfindahl index
+                        'Concentracion_Top5': x.nlargest(5, '% of Portfolio')['% of Portfolio'].sum()
+                    })
+                ).reset_index()
+                
+                if not diversity_scores.empty:
+                    max_num = diversity_scores['Num_Acciones'].max()
+                    max_num = max_num if max_num > 0 else 1
+                    
+                    # Calculate diversity score safely
+                    diversity_scores['Puntuacion_Diversidad'] = 0  # Initialize
+                    if max_num > 0:
+                        num_component = (diversity_scores['Num_Acciones'] / max_num) * 40
+                        hhi_component = ((1 - diversity_scores['HHI'].clip(upper=10000) / 10000) * 100) * 30
+                        top5_component = ((100 - diversity_scores['Concentracion_Top5'].clip(upper=100)) / 100 * 100) * 30
+                        
+                        diversity_scores['Puntuacion_Diversidad'] = num_component + hhi_component + top5_component
+                    
+                    fig_diversity = px.scatter(
+                        diversity_scores,
+                        x='Num_Acciones',
+                        y='Puntuacion_Diversidad',
+                        size='Concentracion_Top5',
+                        color='Puntuacion_Diversidad',
+                        hover_data=['Investor'],
+                        color_continuous_scale='Turbo',
+                        title=f'Panorama de Diversidad - {len(selected_investors_div)} Inversores Seleccionados',
+                        labels={'Num_Acciones': 'Número de Posiciones', 'Puntuacion_Diversidad': 'Puntuación de Diversidad (0-100)'}
+                    )
+                    
+                    fig_diversity.update_layout(
+                        height=500,
+                        paper_bgcolor='rgba(0,0,0,0)',
+                        plot_bgcolor='rgba(0,0,0,0)',
+                        font=dict(color='white')
+                    )
+                    
+                    st.plotly_chart(fig_diversity, use_container_width=True)
+                else:
+                    st.info("No hay datos de diversidad disponibles para los inversores seleccionados")
+            else:
+                st.warning("Por favor selecciona al menos un inversor para el análisis de diversidad")
         
         with col2:
             st.markdown("### 📊 Distribución de Concentración")
+            
+            # Use pre-selected investors for box plot
+            selected_investors_box = st.multiselect(
+                "Refinar selección para distribución (opcional):",
+                selected_investors_intel,
+                default=selected_investors_intel[:min(10, len(selected_investors_intel))],
+                max_selections=15,
+                key="box_investors",
+                help="Refina la selección para el diagrama de caja"
+            )
+            
             with st.expander("ℹ️ Cómo leer este gráfico"):
                 st.markdown("""
                 **Propósito:** Muestra qué tan concentradas están las carteras de diferentes inversores.
@@ -786,31 +904,43 @@ elif view_mode == "🎯 Inteligencia de Portafolio":
                 **Por qué importa:** Muestra si un inversor tiene pocas apuestas grandes o muchas posiciones iguales.
                 """)
             
-            # Box plot for top investors
-            top_investors_box = filtered_df.groupby('Investor')['Value_Clean'].sum().nlargest(10).index
-            box_data = filtered_df[filtered_df['Investor'].isin(top_investors_box)]
-            
-            fig_box = px.box(
-                box_data,
-                x='Investor',
-                y='% of Portfolio',
-                color='Investor',
-                title='Distribución del Tamaño de Posición por Inversor'
-            )
-            
-            fig_box.update_layout(
-                height=500,
-                showlegend=False,
-                xaxis_tickangle=-45,
-                paper_bgcolor='rgba(0,0,0,0)',
-                plot_bgcolor='rgba(0,0,0,0)',
-                font=dict(color='white', size=9)
-            )
-            
-            st.plotly_chart(fig_box, use_container_width=True)
+            # Box plot for selected investors
+            if selected_investors_box:
+                box_data = intel_df[intel_df['Investor'].isin(selected_investors_box)]
+                
+                fig_box = px.box(
+                    box_data,
+                    x='Investor',
+                    y='% of Portfolio',
+                    color='Investor',
+                    title=f'Distribución del Tamaño de Posición - {len(selected_investors_box)} Inversores Seleccionados'
+                )
+                
+                fig_box.update_layout(
+                    height=500,
+                    showlegend=False,
+                    xaxis_tickangle=-45,
+                    paper_bgcolor='rgba(0,0,0,0)',
+                    plot_bgcolor='rgba(0,0,0,0)',
+                    font=dict(color='white', size=9)
+                )
+                
+                st.plotly_chart(fig_box, use_container_width=True)
+            else:
+                st.warning("Por favor selecciona al menos un inversor para ver la distribución")
     
     with tab3:
         st.markdown("### 🔮 Reconocimiento de Patrones de Trading")
+        
+        # Use pre-selected investors for trading patterns
+        selected_investors_pattern = st.multiselect(
+            "Refinar selección para análisis de patrones (opcional):",
+            selected_investors_intel,
+            default=selected_investors_intel,
+            key="pattern_investors",
+            help="Refina la selección para el análisis de patrones de trading"
+        )
+        
         with st.expander("ℹ️ Entendiendo los Patrones de Trading"):
             st.markdown("""
             **Puntuación de Agresividad:** Porcentaje de posiciones siendo compradas o añadidas (vs vendidas/mantenidas).
@@ -824,30 +954,44 @@ elif view_mode == "🎯 Inteligencia de Portafolio":
             **Caso de uso:** Identificar qué inversores tienen más confianza en las condiciones actuales del mercado.
             """)
         
-        # Analyze trading patterns
-        pattern_data = filtered_df.groupby(['Investor', 'Activity_Type']).size().unstack(fill_value=0)
-        pattern_data['Agresividad'] = (pattern_data.get('Compra', 0) + pattern_data.get('Añadir', 0)) / (pattern_data.sum(axis=1) + 1) * 100
-        pattern_data = pattern_data.sort_values('Agresividad', ascending=False).head(20)
-        
-        fig_pattern = px.bar(
-            pattern_data.reset_index(),
-            x='Investor',
-            y='Agresividad',
-            color='Agresividad',
-            color_continuous_scale='RdYlGn',
-            title='Puntuación de Agresividad en Trading (% Actividad Compra+Añadir)',
-            labels={'Agresividad': 'Puntuación de Agresividad (%)'}
-        )
-        
-        fig_pattern.update_layout(
-            height=500,
-            xaxis_tickangle=-45,
-            paper_bgcolor='rgba(0,0,0,0)',
-            plot_bgcolor='rgba(0,0,0,0)',
-            font=dict(color='white', size=10)
-        )
-        
-        st.plotly_chart(fig_pattern, use_container_width=True)
+        # Analyze trading patterns for selected investors
+        if selected_investors_pattern:
+            pattern_df = intel_df[intel_df['Investor'].isin(selected_investors_pattern)]
+            if not pattern_df.empty:
+                pattern_data = pattern_df.groupby(['Investor', 'Activity_Type']).size().unstack(fill_value=0)
+                
+                if not pattern_data.empty:
+                    # Calculate aggressiveness safely
+                    total_sum = pattern_data.sum(axis=1)
+                    total_sum = total_sum.replace(0, 1)  # Avoid division by zero
+                    pattern_data['Agresividad'] = (pattern_data.get('Compra', 0) + pattern_data.get('Añadir', 0)) / total_sum * 100
+                    pattern_data = pattern_data.sort_values('Agresividad', ascending=False)
+                    
+                    fig_pattern = px.bar(
+                        pattern_data.reset_index(),
+                        x='Investor',
+                        y='Agresividad',
+                        color='Agresividad',
+                        color_continuous_scale='RdYlGn',
+                        title=f'Puntuación de Agresividad en Trading - {len(selected_investors_pattern)} Inversores Seleccionados',
+                        labels={'Agresividad': 'Puntuación de Agresividad (%)'}
+                    )
+                    
+                    fig_pattern.update_layout(
+                        height=500,
+                        xaxis_tickangle=-45,
+                        paper_bgcolor='rgba(0,0,0,0)',
+                        plot_bgcolor='rgba(0,0,0,0)',
+                        font=dict(color='white', size=10)
+                    )
+                    
+                    st.plotly_chart(fig_pattern, use_container_width=True)
+                else:
+                    st.info("No hay datos de patrones disponibles")
+            else:
+                st.info("No hay datos disponibles para los inversores seleccionados")
+        else:
+            st.warning("Por favor selecciona al menos un inversor para ver los patrones de trading")
 
 elif view_mode == "🔥 Matriz de Acciones Calientes":
     st.markdown("## 🔥 Matriz Avanzada de Acciones Calientes", unsafe_allow_html=True)
@@ -868,7 +1012,7 @@ elif view_mode == "🔥 Matriz de Acciones Calientes":
         - <40: 🔍 Selecciones de nicho - Poseída por pocos inversores o en posiciones pequeñas
         """)
     
-    # Calculate comprehensive metrics
+    # Calculate comprehensive metrics - moved outside of heatmap section
     stock_metrics = filtered_df.groupby('Stock').agg({
         'Investor': 'nunique',
         'Value_Clean': 'sum',
@@ -880,13 +1024,22 @@ elif view_mode == "🔥 Matriz de Acciones Calientes":
     stock_metrics.columns = ['Num_Inversores', 'Valor_Total', 'Cartera_Promedio', 'Cartera_Max', 'Conteo_Compra_Añadir', 'Actividad_Promedio']
     
     # Calculate heat score with multiple factors
-    stock_metrics['Puntuacion_Calor'] = (
-        stock_metrics['Num_Inversores'] / stock_metrics['Num_Inversores'].max() * 30 +
-        stock_metrics['Valor_Total'] / stock_metrics['Valor_Total'].max() * 25 +
-        stock_metrics['Cartera_Promedio'] / stock_metrics['Cartera_Promedio'].max() * 20 +
-        stock_metrics['Conteo_Compra_Añadir'] / stock_metrics['Conteo_Compra_Añadir'].max() * 15 +
-        stock_metrics['Cartera_Max'] / stock_metrics['Cartera_Max'].max() * 10
-    ) * 100
+    if not stock_metrics.empty:
+        max_investors = stock_metrics['Num_Inversores'].max() if stock_metrics['Num_Inversores'].max() > 0 else 1
+        max_value = stock_metrics['Valor_Total'].max() if stock_metrics['Valor_Total'].max() > 0 else 1
+        max_avg = stock_metrics['Cartera_Promedio'].max() if stock_metrics['Cartera_Promedio'].max() > 0 else 1
+        max_count = stock_metrics['Conteo_Compra_Añadir'].max() if stock_metrics['Conteo_Compra_Añadir'].max() > 0 else 1
+        max_max = stock_metrics['Cartera_Max'].max() if stock_metrics['Cartera_Max'].max() > 0 else 1
+        
+        stock_metrics['Puntuacion_Calor'] = (
+            stock_metrics['Num_Inversores'] / max_investors * 30 +
+            stock_metrics['Valor_Total'] / max_value * 25 +
+            stock_metrics['Cartera_Promedio'] / max_avg * 20 +
+            stock_metrics['Conteo_Compra_Añadir'] / max_count * 15 +
+            stock_metrics['Cartera_Max'] / max_max * 10
+        ) * 100
+    else:
+        stock_metrics['Puntuacion_Calor'] = 0
     
     hot_stocks = stock_metrics.sort_values('Puntuacion_Calor', ascending=False).head(30)
     
@@ -914,34 +1067,64 @@ elif view_mode == "🔥 Matriz de Acciones Calientes":
         - Valores atípicos: Apuestas únicas de alta convicción
         """)
     
-    fig_3d_bubble = px.scatter_3d(
-        hot_stocks.reset_index(),
-        x='Num_Inversores',
-        y='Cartera_Promedio',
-        z='Valor_Total',
-        size='Puntuacion_Calor',
-        color='Puntuacion_Calor',
-        hover_data=['Stock', 'Conteo_Compra_Añadir'],
-        color_continuous_scale='Hot_r',
-        title='Análisis Interactivo 3D de Acciones Calientes'
-    )
+    if not hot_stocks.empty:
+        fig_3d_bubble = px.scatter_3d(
+            hot_stocks.reset_index(),
+            x='Num_Inversores',
+            y='Cartera_Promedio',
+            z='Valor_Total',
+            size='Puntuacion_Calor',
+            color='Puntuacion_Calor',
+            hover_data=['Stock', 'Conteo_Compra_Añadir'],
+            color_continuous_scale='Hot_r',
+            title='Análisis Interactivo 3D de Acciones Calientes'
+        )
+        
+        fig_3d_bubble.update_layout(
+            scene=dict(
+                xaxis_title='Número de Inversores',
+                yaxis_title='% Promedio en Cartera',
+                zaxis_title='Valor Total ($)',
+                camera=dict(eye=dict(x=1.5, y=1.5, z=1.3))
+            ),
+            height=700,
+            paper_bgcolor='rgba(0,0,0,0)',
+            font=dict(color='white')
+        )
+        
+        st.plotly_chart(fig_3d_bubble, use_container_width=True)
+    else:
+        st.info("No hay suficientes datos para mostrar el gráfico 3D de acciones calientes")
     
-    fig_3d_bubble.update_layout(
-        scene=dict(
-            xaxis_title='Número de Inversores',
-            yaxis_title='% Promedio en Cartera',
-            zaxis_title='Valor Total ($)',
-            camera=dict(eye=dict(x=1.5, y=1.5, z=1.3))
-        ),
-        height=700,
-        paper_bgcolor='rgba(0,0,0,0)',
-        font=dict(color='white')
-    )
-    
-    st.plotly_chart(fig_3d_bubble, use_container_width=True)
-    
-    # Heatmap of top stocks vs top investors
+    # Heatmap of top stocks vs selected investors
     st.markdown("### 🌡️ Matriz de Propiedad Acción-Inversor")
+    
+    # Add investor selection for heatmap
+    col_hm1, col_hm2 = st.columns([3, 1])
+    
+    with col_hm1:
+        all_investors_hm = sorted(filtered_df['Investor'].unique())
+        default_hm = filtered_df.groupby('Investor')['Value_Clean'].sum().nlargest(15).index.tolist()
+        
+        selected_investors_hm = st.multiselect(
+            "🎯 Seleccionar inversores para el mapa de calor:",
+            all_investors_hm,
+            default=default_hm if len(all_investors_hm) >= 15 else all_investors_hm[:min(15, len(all_investors_hm))],
+            max_selections=20,
+            key="heatmap_investors",
+            help="Selecciona qué inversores quieres ver en el mapa de calor"
+        )
+    
+    with col_hm2:
+        num_stocks_hm = st.slider(
+            "Top acciones a mostrar",
+            min_value=10,
+            max_value=30,
+            value=20,
+            step=5,
+            help="Número de acciones calientes a mostrar"
+        )
+    
     with st.expander("ℹ️ Cómo leer el mapa de calor"):
         st.markdown("""
         **Propósito:** Muestra qué inversores poseen qué acciones calientes y en qué concentración.
@@ -960,38 +1143,95 @@ elif view_mode == "🔥 Matriz de Acciones Calientes":
         **Consejo pro:** Acciones con muchas celdas naranjas/rojas entre diferentes inversores indican fuerte consenso.
         """)
     
-    top_stocks_hm = hot_stocks.head(20).index
-    top_investors_hm = filtered_df.groupby('Investor')['Value_Clean'].sum().nlargest(15).index
-    
-    heatmap_data = filtered_df[
-        (filtered_df['Stock'].isin(top_stocks_hm)) & 
-        (filtered_df['Investor'].isin(top_investors_hm))
-    ].pivot_table(
-        values='% of Portfolio',
-        index='Stock',
-        columns='Investor',
-        fill_value=0
-    )
-    
-    fig_heatmap = px.imshow(
-        heatmap_data,
-        color_continuous_scale='Turbo',
-        title='Mapa de Calor de Peso en Cartera (Top Acciones vs Top Inversores)',
-        labels=dict(color="% Cartera"),
-        aspect='auto'
-    )
-    
-    fig_heatmap.update_layout(
-        height=600,
-        xaxis_tickangle=-45,
-        paper_bgcolor='rgba(0,0,0,0)',
-        font=dict(color='white', size=9)
-    )
-    
-    st.plotly_chart(fig_heatmap, use_container_width=True)
+    if selected_investors_hm and not hot_stocks.empty:
+        top_stocks_hm = hot_stocks.head(num_stocks_hm).index
+        
+        heatmap_data = filtered_df[
+            (filtered_df['Stock'].isin(top_stocks_hm)) & 
+            (filtered_df['Investor'].isin(selected_investors_hm))
+        ].pivot_table(
+            values='% of Portfolio',
+            index='Stock',
+            columns='Investor',
+            fill_value=0
+        )
+        
+        if not heatmap_data.empty:
+            fig_heatmap = px.imshow(
+                heatmap_data,
+                color_continuous_scale='Turbo',
+                title=f'Mapa de Calor - Top {num_stocks_hm} Acciones vs {len(selected_investors_hm)} Inversores Seleccionados',
+                labels=dict(color="% Cartera"),
+                aspect='auto'
+            )
+            
+            fig_heatmap.update_layout(
+                height=600,
+                xaxis_tickangle=-45,
+                paper_bgcolor='rgba(0,0,0,0)',
+                font=dict(color='white', size=9)
+            )
+            
+            st.plotly_chart(fig_heatmap, use_container_width=True)
+            
+            # Show some statistics
+            st.caption(f"💡 Mostrando {len(heatmap_data.columns)} inversores × {len(heatmap_data.index)} acciones = {len(heatmap_data.columns) * len(heatmap_data.index)} posibles posiciones")
+        else:
+            st.info("No hay datos disponibles para el mapa de calor con los inversores seleccionados")
+    else:
+        st.warning("Por favor selecciona al menos un inversor para el mapa de calor")
 
 elif view_mode == "📊 Análisis Avanzado":
     st.markdown("## 📊 Análisis Estadístico Avanzado", unsafe_allow_html=True)
+    
+    # Add investor selection for all advanced analysis
+    st.markdown("### 🎯 Selección de Inversores para Análisis")
+    col_sel1, col_sel2 = st.columns([3, 1])
+    
+    with col_sel1:
+        all_investors_adv = sorted(filtered_df['Investor'].unique())
+        
+        # Quick selection options
+        quick_select_adv = st.radio(
+            "Selección rápida:",
+            ["Top 20 por valor", "Top 10 por valor", "Top 5 por valor", "Personalizado"],
+            horizontal=True,
+            index=0,
+            key="quick_select_advanced"
+        )
+        
+        if quick_select_adv == "Top 20 por valor":
+            default_adv = filtered_df.groupby('Investor')['Value_Clean'].sum().nlargest(20).index.tolist()
+        elif quick_select_adv == "Top 10 por valor":
+            default_adv = filtered_df.groupby('Investor')['Value_Clean'].sum().nlargest(10).index.tolist()
+        elif quick_select_adv == "Top 5 por valor":
+            default_adv = filtered_df.groupby('Investor')['Value_Clean'].sum().nlargest(5).index.tolist()
+        else:
+            default_adv = []
+        
+        selected_investors_adv = st.multiselect(
+            "🎯 Seleccionar inversores para análisis avanzado (máx. 30):",
+            all_investors_adv,
+            default=default_adv if len(all_investors_adv) >= len(default_adv) else all_investors_adv[:min(20, len(all_investors_adv))],
+            max_selections=30,
+            key="advanced_investors",
+            help="Estos inversores se usarán en todos los gráficos de análisis avanzado"
+        )
+    
+    with col_sel2:
+        st.metric("Inversores seleccionados", len(selected_investors_adv))
+        if selected_investors_adv:
+            total_value_selected = filtered_df[filtered_df['Investor'].isin(selected_investors_adv)]['Value_Clean'].sum() / 1e9
+            st.metric("Valor total", f"${total_value_selected:.1f}B")
+    
+    if not selected_investors_adv:
+        st.warning("⚠️ Por favor selecciona al menos un inversor para el análisis avanzado.")
+        st.stop()
+    
+    # Filter data for selected investors
+    analysis_df = filtered_df[filtered_df['Investor'].isin(selected_investors_adv)]
+    
+    st.markdown("---")
     
     tab1, tab2, tab3 = st.tabs(["📈 Análisis de Tendencias", "🔄 Matriz de Correlación", "📊 Patrones de Actividad"])
     
@@ -1014,53 +1254,63 @@ elif view_mode == "📊 Análisis Avanzado":
             **Tamaño de burbuja:** Representa el número total de acciones
             """)
         
-        # Create activity timeline
-        activity_summary = filtered_df.groupby(['Investor', 'Activity_Type']).size().unstack(fill_value=0)
+        # Create activity timeline using selected investors
+        activity_summary = analysis_df.groupby(['Investor', 'Activity_Type']).size().unstack(fill_value=0)
         
         # Calculate trend metrics
-        trend_data = pd.DataFrame({
-            'Inversor': activity_summary.index,
-            'Ratio_Compra': (activity_summary.get('Compra', 0) + activity_summary.get('Añadir', 0)) / activity_summary.sum(axis=1) * 100,
-            'Acciones_Totales': activity_summary.sum(axis=1)
-        })
-        
-        fig_trend = px.scatter(
-            trend_data,
-            x='Acciones_Totales',
-            y='Ratio_Compra',
-            size='Acciones_Totales',
-            color='Ratio_Compra',
-            hover_data=['Inversor'],
-            color_continuous_scale='RdYlGn',
-            title='Sentimiento Compra/Añadir vs Nivel de Actividad',
-            labels={'Ratio_Compra': 'Actividad Alcista (%)', 'Acciones_Totales': 'Número de Acciones'}
-        )
-        
-        # Add quadrant lines
-        fig_trend.add_hline(y=50, line_dash="dash", line_color="gray", opacity=0.5)
-        fig_trend.add_vline(x=trend_data['Acciones_Totales'].median(), line_dash="dash", line_color="gray", opacity=0.5)
-        
-        fig_trend.update_layout(
-            height=500,
-            paper_bgcolor='rgba(0,0,0,0)',
-            plot_bgcolor='rgba(0,0,0,0)',
-            font=dict(color='white')
-        )
-        
-        st.plotly_chart(fig_trend, use_container_width=True)
+        if not activity_summary.empty:
+            trend_data = pd.DataFrame({
+                'Inversor': activity_summary.index,
+                'Ratio_Compra': ((activity_summary.get('Compra', 0) + activity_summary.get('Añadir', 0)) / 
+                                (activity_summary.sum(axis=1).replace(0, 1)) * 100),
+                'Acciones_Totales': activity_summary.sum(axis=1)
+            })
+            
+            if not trend_data.empty and len(trend_data) > 0:
+                fig_trend = px.scatter(
+                    trend_data,
+                    x='Acciones_Totales',
+                    y='Ratio_Compra',
+                    size='Acciones_Totales',
+                    color='Ratio_Compra',
+                    hover_data=['Inversor'],
+                    color_continuous_scale='RdYlGn',
+                    title=f'Sentimiento Compra/Añadir vs Nivel de Actividad - {len(selected_investors_adv)} Inversores',
+                    labels={'Ratio_Compra': 'Actividad Alcista (%)', 'Acciones_Totales': 'Número de Acciones'}
+                )
+                
+                # Add quadrant lines if we have data
+                if len(trend_data['Acciones_Totales']) > 0:
+                    fig_trend.add_hline(y=50, line_dash="dash", line_color="gray", opacity=0.5)
+                    median_val = trend_data['Acciones_Totales'].median()
+                    if pd.notna(median_val):
+                        fig_trend.add_vline(x=median_val, line_dash="dash", line_color="gray", opacity=0.5)
+                
+                fig_trend.update_layout(
+                    height=500,
+                    paper_bgcolor='rgba(0,0,0,0)',
+                    plot_bgcolor='rgba(0,0,0,0)',
+                    font=dict(color='white')
+                )
+                
+                st.plotly_chart(fig_trend, use_container_width=True)
+            else:
+                st.info("No hay suficientes datos para el análisis de tendencias")
+        else:
+            st.info("No hay datos disponibles para el análisis de tendencias con los inversores seleccionados")
     
     with tab2:
         st.markdown("### 🔄 Correlación de Carteras de Inversores")
         
-        # Add investor selection for correlation matrix
+        # Use the pre-selected investors but allow further filtering
         col_select1, col_select2 = st.columns([3, 1])
         with col_select1:
-            all_investors = sorted(filtered_df['Investor'].unique())
             selected_investors_corr = st.multiselect(
-                "Seleccionar inversores para análisis de correlación:",
-                all_investors,
-                default=all_investors[:15] if len(all_investors) >= 15 else all_investors,
-                key="corr_investors"
+                "Refinar selección para matriz de correlación (opcional):",
+                selected_investors_adv,
+                default=selected_investors_adv[:15] if len(selected_investors_adv) >= 15 else selected_investors_adv,
+                key="corr_investors",
+                help="Puedes refinar la selección para la matriz de correlación si hay demasiados inversores"
             )
         with col_select2:
             min_common = st.number_input(
@@ -1091,8 +1341,8 @@ elif view_mode == "📊 Análisis Avanzado":
             """)
         
         if selected_investors_corr and len(selected_investors_corr) >= 2:
-            # Create correlation matrix based on selected investors
-            corr_pivot = filtered_df[filtered_df['Investor'].isin(selected_investors_corr)].pivot_table(
+            # Create correlation matrix based on selected investors - using analysis_df
+            corr_pivot = analysis_df[analysis_df['Investor'].isin(selected_investors_corr)].pivot_table(
                 values='% of Portfolio',
                 index='Stock',
                 columns='Investor',
@@ -1100,42 +1350,69 @@ elif view_mode == "📊 Análisis Avanzado":
             )
             
             # Filter for minimum common stocks
-            stock_counts = (corr_pivot > 0).sum(axis=1)
-            stocks_with_min = stock_counts[stock_counts >= min_common].index
-            corr_pivot_filtered = corr_pivot.loc[stocks_with_min] if len(stocks_with_min) > 0 else corr_pivot
-            
-            correlation_matrix = corr_pivot_filtered.corr()
-            
-            fig_corr = px.imshow(
-                correlation_matrix,
-                color_continuous_scale='RdBu',
-                title=f'Matriz de Similitud de Carteras ({len(selected_investors_corr)} inversores seleccionados)',
-                labels=dict(color="Correlación"),
-                zmin=-1,
-                zmax=1
-            )
-            
-            # Add text annotations for values
-            fig_corr.update_traces(text=np.round(correlation_matrix.values, 2), texttemplate='%{text}')
-            
-            fig_corr.update_layout(
-                height=600,
-                paper_bgcolor='rgba(0,0,0,0)',
-                font=dict(color='white')
-            )
-            
-            st.plotly_chart(fig_corr, use_container_width=True)
-            
-            # Show statistics
-            col1_stats, col2_stats, col3_stats = st.columns(3)
-            with col1_stats:
-                st.metric("Inversores analizados", len(selected_investors_corr))
-            with col2_stats:
-                avg_corr = correlation_matrix.values[correlation_matrix.values < 1].mean()
-                st.metric("Correlación promedio", f"{avg_corr:.3f}")
-            with col3_stats:
-                max_corr = correlation_matrix.values[correlation_matrix.values < 1].max()
-                st.metric("Correlación máxima", f"{max_corr:.3f}")
+            if not corr_pivot.empty:
+                stock_counts = (corr_pivot > 0).sum(axis=1)
+                stocks_with_min = stock_counts[stock_counts >= min_common].index
+                if len(stocks_with_min) > 0:
+                    corr_pivot_filtered = corr_pivot.loc[stocks_with_min]
+                else:
+                    corr_pivot_filtered = corr_pivot
+                
+                if not corr_pivot_filtered.empty:
+                    correlation_matrix = corr_pivot_filtered.corr()
+                    
+                    fig_corr = px.imshow(
+                        correlation_matrix,
+                        color_continuous_scale='RdBu',
+                        title=f'Matriz de Similitud de Carteras ({len(selected_investors_corr)} inversores seleccionados)',
+                        labels=dict(color="Correlación"),
+                        zmin=-1,
+                        zmax=1
+                    )
+                    
+                    # Add text annotations for values
+                    fig_corr.update_traces(text=np.round(correlation_matrix.values, 2), texttemplate='%{text}')
+                    
+                    fig_corr.update_layout(
+                        height=600,
+                        paper_bgcolor='rgba(0,0,0,0)',
+                        font=dict(color='white')
+                    )
+                    
+                    st.plotly_chart(fig_corr, use_container_width=True)
+                    
+                    # Show statistics with better error handling
+                    col1_stats, col2_stats, col3_stats = st.columns(3)
+                    with col1_stats:
+                        st.metric("Inversores analizados", len(selected_investors_corr))
+                    with col2_stats:
+                        if correlation_matrix.size > 0:
+                            mask = np.ones(correlation_matrix.shape, dtype=bool)
+                            np.fill_diagonal(mask, False)
+                            non_diag = correlation_matrix.values[mask]
+                            if len(non_diag) > 0:
+                                avg_corr = np.nanmean(non_diag)
+                                st.metric("Correlación promedio", f"{avg_corr:.3f}")
+                            else:
+                                st.metric("Correlación promedio", "N/A")
+                        else:
+                            st.metric("Correlación promedio", "N/A")
+                    with col3_stats:
+                        if correlation_matrix.size > 0:
+                            mask = np.ones(correlation_matrix.shape, dtype=bool)
+                            np.fill_diagonal(mask, False)
+                            non_diag = correlation_matrix.values[mask]
+                            if len(non_diag) > 0:
+                                max_corr = np.nanmax(non_diag)
+                                st.metric("Correlación máxima", f"{max_corr:.3f}")
+                            else:
+                                st.metric("Correlación máxima", "N/A")
+                        else:
+                            st.metric("Correlación máxima", "N/A")
+                else:
+                    st.info("No hay suficientes datos para calcular correlaciones")
+            else:
+                st.info("No hay datos disponibles para análisis de correlación")
         else:
             st.warning("Por favor selecciona al menos 2 inversores para el análisis de correlación")
     
@@ -1158,32 +1435,38 @@ elif view_mode == "📊 Análisis Avanzado":
                 **Por qué importa:** Muestra el sentimiento del mercado entre superinversores.
                 """)
             
-            # Categorize investors
-            investor_activity = filtered_df.groupby('Investor')['Activity_Type'].apply(
-                lambda x: 'Compradores' if (x.isin(['Compra', 'Añadir'])).mean() > 0.7 
-                else 'Vendedores' if (x.isin(['Compra', 'Añadir'])).mean() < 0.3 
-                else 'Balanceados'
-            ).value_counts()
-            
-            fig_activity_pie = px.pie(
-                values=investor_activity.values,
-                names=investor_activity.index,
-                color_discrete_map={
-                    'Compradores': '#10B981',
-                    'Balanceados': '#60A5FA',
-                    'Vendedores': '#F87171'
-                },
-                title='Posicionamiento de Inversores',
-                hole=0.4
-            )
-            
-            fig_activity_pie.update_layout(
-                height=400,
-                paper_bgcolor='rgba(0,0,0,0)',
-                font=dict(color='white')
-            )
-            
-            st.plotly_chart(fig_activity_pie, use_container_width=True)
+            # Categorize investors using selected data
+            if not analysis_df.empty:
+                investor_activity = analysis_df.groupby('Investor')['Activity_Type'].apply(
+                    lambda x: 'Compradores' if (x.isin(['Compra', 'Añadir'])).mean() > 0.7 
+                    else 'Vendedores' if (x.isin(['Compra', 'Añadir'])).mean() < 0.3 
+                    else 'Balanceados'
+                ).value_counts()
+                
+                if not investor_activity.empty:
+                    fig_activity_pie = px.pie(
+                        values=investor_activity.values,
+                        names=investor_activity.index,
+                        color_discrete_map={
+                            'Compradores': '#10B981',
+                            'Balanceados': '#60A5FA',
+                            'Vendedores': '#F87171'
+                        },
+                        title='Posicionamiento de Inversores',
+                        hole=0.4
+                    )
+                    
+                    fig_activity_pie.update_layout(
+                        height=400,
+                        paper_bgcolor='rgba(0,0,0,0)',
+                        font=dict(color='white')
+                    )
+                    
+                    st.plotly_chart(fig_activity_pie, use_container_width=True)
+                else:
+                    st.info("No hay datos de actividad disponibles")
+            else:
+                st.info("No hay datos para analizar")
         
         with col2:
             st.markdown("#### 📈 Tendencias de Concentración")
@@ -1199,35 +1482,97 @@ elif view_mode == "📊 Análisis Avanzado":
                 **Perspectiva:** Muestra apetito de riesgo y niveles de convicción.
                 """)
             
-            # Concentration categories
-            concentration_cats = filtered_df.groupby('Investor')['% of Portfolio'].apply(
-                lambda x: 'Concentrado' if x.nlargest(5).sum() > 60
-                else 'Diversificado' if x.nlargest(5).sum() < 40
-                else 'Moderado'
-            ).value_counts()
-            
-            fig_conc_pie = px.pie(
-                values=concentration_cats.values,
-                names=concentration_cats.index,
-                color_discrete_map={
-                    'Concentrado': '#F87171',
-                    'Moderado': '#60A5FA',
-                    'Diversificado': '#10B981'
-                },
-                title='Estilos de Concentración de Cartera',
-                hole=0.4
-            )
-            
-            fig_conc_pie.update_layout(
-                height=400,
-                paper_bgcolor='rgba(0,0,0,0)',
-                font=dict(color='white')
-            )
-            
-            st.plotly_chart(fig_conc_pie, use_container_width=True)
+            # Concentration categories using selected investors
+            if not analysis_df.empty:
+                concentration_cats = analysis_df.groupby('Investor')['% of Portfolio'].apply(
+                    lambda x: 'Concentrado' if x.nlargest(5).sum() > 60
+                    else 'Diversificado' if x.nlargest(5).sum() < 40
+                    else 'Moderado'
+                ).value_counts()
+                
+                if not concentration_cats.empty:
+                    fig_conc_pie = px.pie(
+                        values=concentration_cats.values,
+                        names=concentration_cats.index,
+                        color_discrete_map={
+                            'Concentrado': '#F87171',
+                            'Moderado': '#60A5FA',
+                            'Diversificado': '#10B981'
+                        },
+                        title='Estilos de Concentración de Cartera',
+                        hole=0.4
+                    )
+                    
+                    fig_conc_pie.update_layout(
+                        height=400,
+                        paper_bgcolor='rgba(0,0,0,0)',
+                        font=dict(color='white')
+                    )
+                    
+                    st.plotly_chart(fig_conc_pie, use_container_width=True)
+                else:
+                    st.info("No hay datos de concentración disponibles")
+            else:
+                st.info("No hay datos para analizar")
 
 elif view_mode == "🕸️ Análisis de Red":
     st.markdown("## 🕸️ Análisis de Red de Inversores", unsafe_allow_html=True)
+    
+    # Add investor selection for network analysis
+    st.markdown("### 🎯 Selección de Inversores para Análisis de Red")
+    col_net1, col_net2 = st.columns([3, 1])
+    
+    with col_net1:
+        all_investors_net = sorted(filtered_df['Investor'].unique())
+        
+        # Quick selection options
+        quick_select_net = st.radio(
+            "Selección rápida:",
+            ["Top 20 por valor", "Top 15 por valor", "Top 10 por valor", "Personalizado"],
+            horizontal=True,
+            index=0,
+            key="quick_select_network"
+        )
+        
+        if quick_select_net == "Top 20 por valor":
+            default_net = filtered_df.groupby('Investor')['Value_Clean'].sum().nlargest(20).index.tolist()
+        elif quick_select_net == "Top 15 por valor":
+            default_net = filtered_df.groupby('Investor')['Value_Clean'].sum().nlargest(15).index.tolist()
+        elif quick_select_net == "Top 10 por valor":
+            default_net = filtered_df.groupby('Investor')['Value_Clean'].sum().nlargest(10).index.tolist()
+        else:
+            default_net = []
+        
+        selected_investors_net = st.multiselect(
+            "🎯 Seleccionar inversores para análisis de red (máx. 25):",
+            all_investors_net,
+            default=default_net if len(all_investors_net) >= len(default_net) else all_investors_net[:min(20, len(all_investors_net))],
+            max_selections=25,
+            key="network_investors",
+            help="Selecciona los inversores para ver sus conexiones basadas en posiciones comunes"
+        )
+    
+    with col_net2:
+        st.metric("Inversores seleccionados", len(selected_investors_net))
+        min_common_stocks = st.number_input(
+            "Mín. acciones comunes",
+            min_value=1,
+            max_value=10,
+            value=2,
+            help="Número mínimo de acciones comunes para mostrar conexión"
+        )
+    
+    if not selected_investors_net:
+        st.warning("⚠️ Por favor selecciona al menos 2 inversores para el análisis de red.")
+        st.stop()
+    elif len(selected_investors_net) < 2:
+        st.warning("⚠️ Necesitas al menos 2 inversores para ver conexiones de red.")
+        st.stop()
+    
+    # Filter data for selected investors
+    network_df = filtered_df[filtered_df['Investor'].isin(selected_investors_net)]
+    
+    st.markdown("---")
     
     st.markdown("### 🌐 Red de Posiciones Comunes")
     
@@ -1255,18 +1600,18 @@ elif view_mode == "🕸️ Análisis de Red":
         - Arrastra los nodos para reorganizar la visualización
         """)
     
-    # Find stocks held by multiple investors
-    multi_investor_stocks = filtered_df.groupby('Stock')['Investor'].nunique()
+    # Find stocks held by multiple investors among selected
+    multi_investor_stocks = network_df.groupby('Stock')['Investor'].nunique()
     multi_investor_stocks = multi_investor_stocks[multi_investor_stocks >= 2].index
     
     if len(multi_investor_stocks) == 0:
-        st.warning("No se encontraron posiciones comunes entre inversores con los filtros actuales.")
+        st.warning("No se encontraron posiciones comunes entre los inversores seleccionados.")
     else:
-        network_data = filtered_df[filtered_df['Stock'].isin(multi_investor_stocks)]
+        network_data = network_df[network_df['Stock'].isin(multi_investor_stocks)]
         
-        # Create chord diagram data
+        # Create chord diagram data with selected investors
         chord_data = []
-        investors = network_data['Investor'].unique()[:20]  # Limit to top 20 for clarity
+        investors = selected_investors_net  # Use the selected investors
         
         for i, inv1 in enumerate(investors):
             for j, inv2 in enumerate(investors):
@@ -1274,13 +1619,15 @@ elif view_mode == "🕸️ Análisis de Red":
                     inv1_stocks = set(network_data[network_data['Investor'] == inv1]['Stock'])
                     inv2_stocks = set(network_data[network_data['Investor'] == inv2]['Stock'])
                     common = len(inv1_stocks.intersection(inv2_stocks))
-                    if common > 0:
+                    if common >= min_common_stocks:  # Use the minimum threshold
                         chord_data.append({'source': inv1, 'target': inv2, 'value': common})
         
         # Create Sankey diagram
         chord_df = pd.DataFrame(chord_data)
         
         if not chord_df.empty:
+            st.caption(f"📊 Mostrando {len(chord_df)} conexiones con al menos {min_common_stocks} acciones comunes entre {len(selected_investors_net)} inversores")
+            
             # Get unique nodes
             nodes = list(set(chord_df['source'].unique()) | set(chord_df['target'].unique()))
             node_indices = {node: i for i, node in enumerate(nodes)}
@@ -1318,16 +1665,25 @@ elif view_mode == "🕸️ Análisis de Red":
                 st.metric("Conexiones Totales", len(chord_df))
             
             with col2:
-                avg_common = chord_df['value'].mean()
-                st.metric("Promedio Posiciones Comunes", f"{avg_common:.1f}")
+                if len(chord_df) > 0:
+                    avg_common = chord_df['value'].mean()
+                    st.metric("Promedio Posiciones Comunes", f"{avg_common:.1f}")
+                else:
+                    st.metric("Promedio Posiciones Comunes", "0")
             
             with col3:
-                max_common = chord_df.nlargest(1, 'value')
-                if not max_common.empty:
-                    st.metric("Par Más Similar", f"{max_common['value'].values[0]} acciones")
-                    st.caption(f"{max_common['source'].values[0][:15]} & {max_common['target'].values[0][:15]}")
+                if not chord_df.empty:
+                    max_common = chord_df.nlargest(1, 'value')
+                    if not max_common.empty:
+                        st.metric("Par Más Similar", f"{max_common['value'].values[0]} acciones")
+                        st.caption(f"{max_common['source'].values[0][:15]} & {max_common['target'].values[0][:15]}")
+                    else:
+                        st.metric("Par Más Similar", "N/A")
+                else:
+                    st.metric("Par Más Similar", "N/A")
         else:
-            st.info("No se encontraron conexiones entre los inversores seleccionados.")
+            st.info(f"No se encontraron conexiones entre los inversores seleccionados con al menos {min_common_stocks} acciones comunes.")
+            st.info("💡 Intenta reducir el número mínimo de acciones comunes o seleccionar diferentes inversores.")
 
 elif view_mode == "👤 Análisis Individual":
     # Individual investor analysis with advanced visualizations
@@ -1341,16 +1697,36 @@ elif view_mode == "👤 Análisis Individual":
     with col1:
         st.metric("Posiciones", f"{len(investor_df)}")
     with col2:
-        total_value = investor_df['Value_Clean'].sum() / 1e6
+        if not investor_df.empty:
+            total_value = investor_df['Value_Clean'].sum() / 1e6
+        else:
+            total_value = 0
         st.metric("Valor Cartera", f"${total_value:.1f}M")
     with col3:
-        top_holding = investor_df.nlargest(1, '% of Portfolio')['% of Portfolio'].values[0] if not investor_df.empty else 0
+        if not investor_df.empty:
+            top_holding_df = investor_df.nlargest(1, '% of Portfolio')
+            if not top_holding_df.empty:
+                top_holding = top_holding_df['% of Portfolio'].values[0]
+            else:
+                top_holding = 0
+        else:
+            top_holding = 0
         st.metric("Top Posición", f"{top_holding:.1f}%")
     with col4:
-        concentration = investor_df.nlargest(5, '% of Portfolio')['% of Portfolio'].sum() if not investor_df.empty else 0
+        if not investor_df.empty:
+            top5_df = investor_df.nlargest(5, '% of Portfolio')
+            if not top5_df.empty:
+                concentration = top5_df['% of Portfolio'].sum()
+            else:
+                concentration = 0
+        else:
+            concentration = 0
         st.metric("Conc. Top 5", f"{concentration:.1f}%")
     with col5:
-        buy_ratio = (investor_df['Activity_Type'].isin(['Compra', 'Añadir'])).sum() / max(len(investor_df), 1) * 100
+        if len(investor_df) > 0:
+            buy_ratio = (investor_df['Activity_Type'].isin(['Compra', 'Añadir'])).sum() / len(investor_df) * 100
+        else:
+            buy_ratio = 0
         st.metric("Ratio Compra/Añadir", f"{buy_ratio:.1f}%")
     
     st.markdown("---")
