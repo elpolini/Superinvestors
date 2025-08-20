@@ -633,72 +633,26 @@ if view_mode == "🌟 Universo de Carteras":
 elif view_mode == "🎯 Inteligencia de Portafolio":
     st.markdown("## 🎯 Inteligencia Avanzada de Portafolio", unsafe_allow_html=True)
     
-    # Add global investor selection for Portfolio Intelligence
-    st.markdown("### 🎯 Selección de Inversores para Análisis de Inteligencia")
-    col_intel1, col_intel2 = st.columns([3, 1])
-    
-    with col_intel1:
-        all_investors_intel = sorted(filtered_df['Investor'].unique())
-        
-        # Quick selection options
-        quick_select_intel = st.radio(
-            "Selección rápida:",
-            ["Top 20 por valor", "Top 10 por valor", "Top 5 por valor", "Personalizado"],
-            horizontal=True,
-            index=1,  # Default to Top 10
-            key="quick_select_intel"
-        )
-        
-        if quick_select_intel == "Top 20 por valor":
-            default_intel = filtered_df.groupby('Investor')['Value_Clean'].sum().nlargest(20).index.tolist()
-        elif quick_select_intel == "Top 10 por valor":
-            default_intel = filtered_df.groupby('Investor')['Value_Clean'].sum().nlargest(10).index.tolist()
-        elif quick_select_intel == "Top 5 por valor":
-            default_intel = filtered_df.groupby('Investor')['Value_Clean'].sum().nlargest(5).index.tolist()
-        else:
-            default_intel = []
-        
-        selected_investors_intel = st.multiselect(
-            "🎯 Seleccionar inversores para análisis de inteligencia (máx. 30):",
-            all_investors_intel,
-            default=default_intel if len(all_investors_intel) >= len(default_intel) else all_investors_intel[:min(10, len(all_investors_intel))],
-            max_selections=30,
-            key="intel_investors",
-            help="Estos inversores se usarán en todos los análisis de inteligencia de portafolio"
-        )
-    
-    with col_intel2:
-        st.metric("Inversores seleccionados", len(selected_investors_intel))
-        if selected_investors_intel:
-            total_positions = filtered_df[filtered_df['Investor'].isin(selected_investors_intel)]['Stock'].nunique()
-            st.metric("Acciones únicas", total_positions)
-    
-    if not selected_investors_intel:
-        st.warning("⚠️ Por favor selecciona al menos un inversor para el análisis de inteligencia.")
-        st.stop()
-    
-    # Filter data for selected investors
-    intel_df = filtered_df[filtered_df['Investor'].isin(selected_investors_intel)]
-    
-    st.markdown("---")
-    
     # Create sub-tabs for different analyses
     tab1, tab2, tab3 = st.tabs(["📊 Análisis de Concentración", "🎯 Puntuación de Diversidad", "🔮 Reconocimiento de Patrones"])
     
     with tab1:
         st.markdown("### 📊 Análisis Multidimensional de Inversores")
         
-        # Refine selection for radar chart from pre-selected investors
+        # Add investor selection for radar chart
         col_radar1, col_radar2 = st.columns([3, 1])
         
         with col_radar1:
+            all_investors_radar = sorted(filtered_df['Investor'].unique())
+            default_radar = filtered_df.groupby('Investor')['Value_Clean'].sum().nlargest(6).index.tolist()
+            
             selected_radar = st.multiselect(
-                "🎯 Refinar selección para gráfico radar (máx. 8):",
-                selected_investors_intel,
-                default=selected_investors_intel[:min(6, len(selected_investors_intel))],
+                "🎯 Seleccionar inversores para comparar en radar (máx. 8):",
+                all_investors_radar,
+                default=default_radar if len(all_investors_radar) >= 6 else all_investors_radar[:min(6, len(all_investors_radar))],
                 max_selections=8,
                 key="radar_investors",
-                help="Selecciona hasta 8 inversores del grupo principal para comparación multidimensional"
+                help="Selecciona hasta 8 inversores para comparación multidimensional"
             )
         
         with col_radar2:
@@ -723,10 +677,10 @@ elif view_mode == "🎯 Inteligencia de Portafolio":
             """)
         
         if selected_radar:
-            # Create radar chart for selected investors using intel_df
+            # Create radar chart for selected investors
             radar_data = []
             for investor in selected_radar:
-                investor_df = intel_df[intel_df['Investor'] == investor]
+                investor_df = filtered_df[filtered_df['Investor'] == investor]
                 if not investor_df.empty:
                     radar_data.append({
                         'Investor': investor,
@@ -772,13 +726,17 @@ elif view_mode == "🎯 Inteligencia de Portafolio":
     with tab2:
         st.markdown("### 🎯 Análisis de Diversidad de Cartera")
         
-        # Optionally refine selection for diversity analysis
+        # Add investor selection for diversity analysis
+        all_investors_div = sorted(filtered_df['Investor'].unique())
+        default_div = filtered_df.groupby('Investor')['Value_Clean'].sum().nlargest(20).index.tolist()
+        
         selected_investors_div = st.multiselect(
-            "Refinar selección para análisis de diversidad (opcional):",
-            selected_investors_intel,
-            default=selected_investors_intel,
+            "Seleccionar inversores para análisis de diversidad:",
+            all_investors_div,
+            default=default_div if len(all_investors_div) >= 20 else all_investors_div[:min(20, len(all_investors_div))],
+            max_selections=30,
             key="diversity_investors",
-            help="Puedes refinar la selección del grupo principal si lo deseas"
+            help="Selecciona los inversores para analizar su diversidad de cartera"
         )
         
         col1, col2 = st.columns(2)
@@ -803,7 +761,7 @@ elif view_mode == "🎯 Inteligencia de Portafolio":
             
             # Calculate diversity score for selected investors
             if selected_investors_div:
-                div_df = intel_df[intel_df['Investor'].isin(selected_investors_div)]
+                div_df = filtered_df[filtered_df['Investor'].isin(selected_investors_div)]
                 diversity_scores = div_df.groupby('Investor').apply(
                     lambda x: pd.Series({
                         'Num_Acciones': x['Stock'].nunique(),
@@ -849,14 +807,17 @@ elif view_mode == "🎯 Inteligencia de Portafolio":
         with col2:
             st.markdown("### 📊 Distribución de Concentración")
             
-            # Use pre-selected investors for box plot
+            # Add investor selection for box plot
+            all_investors_box = sorted(filtered_df['Investor'].unique())
+            top_by_value = filtered_df.groupby('Investor')['Value_Clean'].sum().nlargest(10).index.tolist()
+            
             selected_investors_box = st.multiselect(
-                "Refinar selección para distribución (opcional):",
-                selected_investors_intel,
-                default=selected_investors_intel[:min(10, len(selected_investors_intel))],
+                "Seleccionar inversores para análisis de distribución:",
+                all_investors_box,
+                default=top_by_value if len(all_investors_box) >= 10 else all_investors_box[:min(10, len(all_investors_box))],
                 max_selections=15,
                 key="box_investors",
-                help="Refina la selección para el diagrama de caja"
+                help="Selecciona hasta 15 inversores para comparar sus distribuciones de posición"
             )
             
             with st.expander("ℹ️ Cómo leer este gráfico"):
@@ -874,7 +835,7 @@ elif view_mode == "🎯 Inteligencia de Portafolio":
             
             # Box plot for selected investors
             if selected_investors_box:
-                box_data = intel_df[intel_df['Investor'].isin(selected_investors_box)]
+                box_data = filtered_df[filtered_df['Investor'].isin(selected_investors_box)]
                 
                 fig_box = px.box(
                     box_data,
@@ -900,13 +861,17 @@ elif view_mode == "🎯 Inteligencia de Portafolio":
     with tab3:
         st.markdown("### 🔮 Reconocimiento de Patrones de Trading")
         
-        # Use pre-selected investors for trading patterns
+        # Add investor selection for trading patterns
+        all_investors_pattern = sorted(filtered_df['Investor'].unique())
+        default_pattern = filtered_df.groupby('Investor')['Value_Clean'].sum().nlargest(20).index.tolist()
+        
         selected_investors_pattern = st.multiselect(
-            "Refinar selección para análisis de patrones (opcional):",
-            selected_investors_intel,
-            default=selected_investors_intel,
+            "Seleccionar inversores para análisis de patrones:",
+            all_investors_pattern,
+            default=default_pattern if len(all_investors_pattern) >= 20 else all_investors_pattern[:min(20, len(all_investors_pattern))],
+            max_selections=25,
             key="pattern_investors",
-            help="Refina la selección para el análisis de patrones de trading"
+            help="Selecciona los inversores para analizar sus patrones de trading"
         )
         
         with st.expander("ℹ️ Entendiendo los Patrones de Trading"):
@@ -924,7 +889,7 @@ elif view_mode == "🎯 Inteligencia de Portafolio":
         
         # Analyze trading patterns for selected investors
         if selected_investors_pattern:
-            pattern_df = intel_df[intel_df['Investor'].isin(selected_investors_pattern)]
+            pattern_df = filtered_df[filtered_df['Investor'].isin(selected_investors_pattern)]
             pattern_data = pattern_df.groupby(['Investor', 'Activity_Type']).size().unstack(fill_value=0)
             pattern_data['Agresividad'] = (pattern_data.get('Compra', 0) + pattern_data.get('Añadir', 0)) / (pattern_data.sum(axis=1) + 1) * 100
             pattern_data = pattern_data.sort_values('Agresividad', ascending=False)
@@ -1406,29 +1371,29 @@ elif view_mode == "📊 Análisis Avanzado":
                     else 'Diversificado' if x.nlargest(5).sum() < 40
                     else 'Moderado'
                 ).value_counts()
+            else:
+                concentration_cats = pd.Series(dtype=int)
+            
+            if not concentration_cats.empty:
+                fig_conc_pie = px.pie(
+                    values=concentration_cats.values,
+                    names=concentration_cats.index,
+                    color_discrete_map={
+                        'Concentrado': '#F87171',
+                        'Moderado': '#60A5FA',
+                        'Diversificado': '#10B981'
+                    },
+                    title='Estilos de Concentración de Cartera',
+                    hole=0.4
+                )
                 
-                if not concentration_cats.empty:
-                    fig_conc_pie = px.pie(
-                        values=concentration_cats.values,
-                        names=concentration_cats.index,
-                        color_discrete_map={
-                            'Concentrado': '#F87171',
-                            'Moderado': '#60A5FA',
-                            'Diversificado': '#10B981'
-                        },
-                        title='Estilos de Concentración de Cartera',
-                        hole=0.4
-                    )
-                    
-                    fig_conc_pie.update_layout(
-                        height=400,
-                        paper_bgcolor='rgba(0,0,0,0)',
-                        font=dict(color='white')
-                    )
-                    
-                    st.plotly_chart(fig_conc_pie, use_container_width=True)
-                else:
-                    st.info("No hay datos de concentración disponibles")
+                fig_conc_pie.update_layout(
+                    height=400,
+                    paper_bgcolor='rgba(0,0,0,0)',
+                    font=dict(color='white')
+                )
+                
+                st.plotly_chart(fig_conc_pie, use_container_width=True)
             else:
                 st.info("No hay datos de concentración disponibles")
 
